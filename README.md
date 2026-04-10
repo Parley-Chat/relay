@@ -19,13 +19,17 @@ Key capabilities:
 Download and run the installer:
 
 ```bash
-wget -qO install.sh https://github.com/Parley-Chat/relay/releases/latest/download/install.sh && sudo bash install.sh
+wget https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -O install.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
-Or with curl:
+With curl:
 
 ```bash
-curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -o install.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
 The script will walk you through:
@@ -44,7 +48,7 @@ It installs Python dependencies, writes `config.toml`, creates systemd services 
 To uninstall:
 
 ```bash
-sudo bash install.sh
+sudo ./install.sh
 # choose [X] Uninstall
 ```
 

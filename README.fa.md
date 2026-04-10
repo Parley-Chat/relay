@@ -9,7 +9,6 @@ Relay یک برنامهٔ Python است (Flask + Waitress) که درخواست�
 قابلیت‌های اصلی:
 
 - **مسیرهای مدیریت‌شده** — هر پیشوند مسیر می‌تواند به‌صورت مستقل به بک‌اند پروکسی شود، مسدود گردد (403) یا به آدرس دیگری هدایت شود
-- **فیلتر متد HTTP** — قوانین می‌توانند فقط برای متدهای خاص (GET، POST، PATCH و ...) اعمال شوند تا کنترل دقیق در سطح API فراهم شود
 - **مدیریت فرانت‌اند** — فرانت‌اند Mura را از یک دایرکتوری محلی ارائه دهید، به یک URL جداگانه هدایت کنید یا مسیرهای غیر API را کاملاً غیرفعال کنید
 - **پروکسی بالادست** — تمام درخواست‌های خروجی به بک‌اند را از طریق یک پروکسی HTTP یا SOCKS5 عبور دهید
 - **استریم SSE** — مسیر `/api/v1/stream` با پشتیبانی کامل از Server-Sent Events پروکسی می‌شود
@@ -20,13 +19,17 @@ Relay یک برنامهٔ Python است (Flask + Waitress) که درخواست�
 دانلود و اجرای نصب‌کننده:
 
 ```bash
-wget -qO install.sh https://github.com/Parley-Chat/relay/releases/latest/download/install.sh && sudo bash install.sh
+wget https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -O install.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
 یا با curl:
 
 ```bash
-curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh | sudo bash
+curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -o install.sh
+chmod +x install.sh
+sudo ./install.sh
 ```
 
 اسکریپت مراحل زیر را طی می‌کند:
@@ -45,7 +48,7 @@ curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install
 برای حذف نصب:
 
 ```bash
-sudo bash install.sh
+sudo ./install.sh
 # گزینه [X] Uninstall را انتخاب کنید
 ```
 
@@ -109,7 +112,7 @@ uri_prefix = "your20charprefix"
 
 مسیرهای مدیریت‌شده به شما امکان می‌دهند کنترل کنید که relay با هر مسیر ورودی قبل از رسیدن به هندلر فرانت‌اند چه کاری انجام دهد.
 
-هر ورودی دارای یک `prefix` و یک `action` است. فیلد اختیاری `methods` امکان اعمال قانون فقط برای متدهای HTTP خاص را فراهم می‌کند:
+هر ورودی دارای یک `prefix` است (که با مسیر کامل درخواست، پس از اضافه کردن `uri_prefix`، مقایسه می‌شود) و یک `action`:
 
 | Action | رفتار |
 |--------|-------|
@@ -117,7 +120,9 @@ uri_prefix = "your20charprefix"
 | `block` | خطای 403 Forbidden با بدنهٔ JSON برمی‌گرداند |
 | `redirect` | بر اساس کد مشخص‌شده در `code` (پیش‌فرض 301) به `target` هدایت می‌کند |
 
-قوانین **به ترتیب** بررسی می‌شوند — اولین قانونی که هم prefix و هم متد (در صورت تعریف) با آن تطابق داشته باشد، اعمال می‌شود.
+هر ورودی همچنین یک لیست اختیاری `methods` می‌پذیرد. در صورت وجود، قانون فقط اگر متد درخواست در آن لیست باشد اعمال می‌شود. قوانین بدون `methods` با همه متدها تطابق دارند. این امکان تعریف چند قانون برای یک prefix با رفتار متفاوت به ازای هر متد را فراهم می‌کند.
+
+مسیرها **به ترتیب** بررسی می‌شوند — اولین ترکیب prefix+method که تطابق داشته باشد برنده است. یک prefix تطابق دارد اگر مسیر درخواست دقیقاً برابر prefix باشد یا با `prefix + "/"` شروع شود.
 
 ### تطابق با wildcard
 
@@ -127,6 +132,7 @@ uri_prefix = "your20charprefix"
 |------|------------|-------------|
 | `/api/v1/channel/*/messages` | `/api/v1/channel/abc123/messages` | `/api/v1/channel/messages` |
 | `/api/v1/channel/a*a/messages` | `/api/v1/channel/abca/messages` | `/api/v1/channel/abc/messages` |
+| `/api/v1/channel/*/messages` | `/api/v1/channel/abc/messages/ack` (زیرمسیر) | `/api/v1/channel/abc/other` |
 
 Wildcardها فقط درون segment خود گسترش می‌یابند و از `/` عبور نمی‌کنند. الگوی wildcard همچنان به عنوان prefix عمل می‌کند — اگر مسیر از الگو فراتر رود، باز هم تطابق دارد.
 
@@ -146,14 +152,54 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
 
 | پیشوند | هدف |
 |--------|-----|
-| `/api/v1` | تمام نقاط پایانی REST API (احراز هویت، کانال‌ها، پیام‌ها، اعضا، کلیدها، پین‌ها، تماس‌ها) |
+| `/api/v1` | تمام نقاط پایانی REST API (احراز هویت، کانال‌ها، پیام‌ها، ...) |
 | `/pfp` | ارائهٔ فایل‌های تصویر پروفایل |
 | `/attachment` | ارائهٔ فایل‌های پیوست پیام |
-| `/health` | بررسی سلامت سرویس |
+
+هر درخواستی که با هیچ مسیر مدیریت‌شده‌ای تطابق نداشته باشد، توسط تنظیم حالت فرانت‌اند مدیریت می‌شود.
+
+### مثال: مسدود کردن پیشوند pfp
+
+```toml
+[[paths]]
+    prefix = "/pfp"
+    action = "block"
+```
+
+### مثال: هدایت مسیر قدیمی
+
+فیلد `code` نوع redirect را کنترل می‌کند. کدهای پشتیبانی‌شده:
+
+| کد | معنی |
+|----|------|
+| `302` | موقت، متد به GET تغییر می‌کند |
+| `307` | موقت، **متد اصلی حفظ می‌شود** |
+| `301` | دائمی، متد ممکن است به GET تغییر کند |
+| `308` | دائمی، **متد اصلی حفظ می‌شود** |
+
+```toml
+[[paths]]
+    prefix = "/old-api"
+    action = "redirect"
+    target = "https://example.com/new-api"
+    # code = 301   ← پیش‌فرض، می‌توان حذف کرد یا صراحتاً تعیین کرد
+
+[[paths]]
+    prefix = "/beta"
+    action = "redirect"
+    target = "https://example.com/beta-new"
+    code = 302
+
+[[paths]]
+    prefix = "/api/v1/upload"
+    action = "redirect"
+    target = "https://upload.example.com/api/v1/upload"
+    code = 307   # حفظ بدنه و متد POST
+```
 
 ## کنترل دقیق API
 
-فیلد `methods` امکان اعمال قوانین متفاوت برای متدهای مختلف روی یک مسیر را می‌دهد.
+فیلد `methods` امکان اعمال قوانین متفاوت برای متدهای مختلف روی یک مسیر را می‌دهد. قوانین به ترتیب بررسی می‌شوند و اولین قانونی که هم prefix و هم متد با آن تطابق داشته باشد استفاده می‌شود.
 
 ### اجازهٔ خواندن، مسدود کردن نوشتن
 
@@ -165,13 +211,15 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
 
 [[paths]]
     prefix = "/api/v1/channel"
-    # بدون methods — با همه متدهای باقی‌مانده (GET، OPTIONS، ...) تطابق دارد
+    # بدون methods — با همه متدهای باقی‌مانده (GET، OPTIONS، HEAD، ...) تطابق دارد
     action = "proxy"
 
 [[paths]]
     prefix = "/api/v1"
     action = "proxy"
 ```
+
+با این پیکربندی، `GET /api/v1/channel/<id>/messages` به‌صورت عادی پروکسی می‌شود در حالی که `POST /api/v1/channel/<id>/messages` (ارسال پیام) خطای 403 برمی‌گرداند.
 
 ### نمونهٔ فقط خواندنی (read-only)
 
@@ -194,10 +242,6 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
 [[paths]]
     prefix = "/attachment"
     action = "proxy"
-
-[[paths]]
-    prefix = "/health"
-    action = "proxy"
 ```
 
 ### مسدود کردن ثبت‌نام و ورود
@@ -216,9 +260,39 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
     action = "proxy"
 ```
 
+### مسدود کردن استریم SSE (غیرفعال کردن رویدادهای بلادرنگ)
+
+```toml
+[[paths]]
+    prefix = "/api/v1/stream"
+    action = "block"
+
+[[paths]]
+    prefix = "/api/v1"
+    action = "proxy"
+```
+
+### مسدود کردن تماس‌های صوتی
+
+مسیرهای تماس در Sova عبارتند از `POST/DELETE /api/v1/channel/<id>/call` و `POST /api/v1/channel/<id>/call/signal`. استفاده از wildcard آن‌ها را بدون تأثیر بر مسیرهای پیام هدف قرار می‌دهد:
+
+```toml
+[[paths]]
+    prefix = "/api/v1/channel/*/call"
+    action = "block"
+
+[[paths]]
+    prefix = "/api/v1"
+    action = "proxy"
+```
+
+`/api/v1/channel/*/call` با endpoint تماس دقیقاً و به عنوان prefix تطابق دارد، بنابراین `/api/v1/channel/<id>/call/signal` نیز مسدود می‌شود.
+
 ## کنترل دسترسی به فایل
 
 ### مسدود کردن دانلود پیوست‌ها
+
+فایل‌های پیوست از `GET /attachment/<file_id>` ارائه می‌شوند. برای جلوگیری از دانلود پیوست توسط کاربران:
 
 ```toml
 [[paths]]
@@ -228,18 +302,38 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
 
 ### مسدود کردن تصاویر پروفایل
 
+تصاویر پروفایل از `GET /pfp/<pfp_id>` ارائه می‌شوند. برای مسدود کردن ارائهٔ تمام تصاویر پروفایل:
+
 ```toml
 [[paths]]
     prefix = "/pfp"
     action = "block"
 ```
 
+### مسدود کردن تمام دانلودها
+
+هر دو بلاک را پیش از قانون proxy مربوط به `/api/v1` قرار دهید تا ابتدا با آن‌ها تطابق پیدا شود:
+
+```toml
+[[paths]]
+    prefix = "/attachment"
+    action = "block"
+
+[[paths]]
+    prefix = "/pfp"
+    action = "block"
+
+[[paths]]
+    prefix = "/api/v1"
+    action = "proxy"
+```
+
 ### مسدود کردن آپلود فایل
 
 در Sova، آپلود فایل مسیر جداگانه‌ای ندارد — فایل‌ها به عنوان multipart form data در درون فراخوانی‌های API عادی ارسال می‌شوند:
 
-- **پیوست پیام‌ها** از طریق `POST /api/v1/channel/<id>/messages` آپلود می‌شوند (همان endpoint ارسال پیام متنی)
-- **تصویر پروفایل** از طریق `PATCH /api/v1/me` آپلود می‌شود (همان endpoint تغییر نام نمایشی)
+- **پیوست پیام‌ها** از طریق `POST /api/v1/channel/<channel_id>/messages` آپلود می‌شوند (همان endpoint ارسال پیام متنی، با فیلد اضافی `files`)
+- **تصویر پروفایل** از طریق `PATCH /api/v1/me` آپلود می‌شود (همان endpoint تغییر نام نمایشی، با فیلد اختیاری `pfp`)
 
 از `block_files = true` استفاده کنید تا relay محتوای multipart را بررسی کند: اگر درخواست حاوی بخش‌های فایل باشد با 403 رد می‌شود؛ اگر form post ساده باشد (پیام متنی، تغییر نام) به بک‌اند ارسال می‌شود.
 
@@ -305,33 +399,6 @@ Wildcardها فقط درون segment خود گسترش می‌یابند و از
 [[paths]]
     prefix = "/api/v1"
     action = "proxy"
-
-[[paths]]
-    prefix = "/health"
-    action = "proxy"
-```
-
-### کدهای redirect
-
-| کد | معنی |
-|----|------|
-| `301` | دائمی — مرورگر کش می‌کند؛ ممکن است متد به GET تغییر کند |
-| `302` | موقت — کش نمی‌شود؛ ممکن است متد به GET تغییر کند |
-| `307` | موقت — کش نمی‌شود؛ **متد اصلی حفظ می‌شود** |
-| `308` | دائمی — کش می‌شود؛ **متد اصلی حفظ می‌شود** |
-
-```toml
-[[paths]]
-    prefix = "/old-api"
-    action = "redirect"
-    target = "https://example.com/new-api"
-    # code = 301   ← پیش‌فرض
-
-[[paths]]
-    prefix = "/beta"
-    action = "redirect"
-    target = "https://example.com/beta-new"
-    code = 307
 ```
 
 ## راه‌اندازی دستی
@@ -342,7 +409,3 @@ python3 main.py
 ```
 
 فایل `config.toml` باید در همان دایرکتوری `main.py` وجود داشته باشد.
-
-## مجوز
-
-MIT
