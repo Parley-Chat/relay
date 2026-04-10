@@ -8,11 +8,11 @@ Relay is a Python application (Flask + Waitress) that accepts HTTP requests and 
 
 Key capabilities:
 
-- **Managed paths** — each path prefix can independently be proxied to the backend, blocked (403), or redirected to another URL
-- **Frontend handling** — serve the Mura frontend from a local directory, forward to a separate URL, or disable non-API routes entirely
-- **Upstream proxy** — route all outbound backend requests through an HTTP or SOCKS5 proxy
-- **SSE streaming** — the `/api/v1/stream` endpoint is proxied with full Server-Sent Events streaming support
-- **nginx + SSL** — the installer sets up its own nginx reverse proxy with Let's Encrypt or self-signed certificates
+- **Managed paths**: each path prefix can independently be proxied to the backend, blocked (403), or redirected to another URL
+- **Frontend handling**: serve the Mura frontend from a local directory, forward to a separate URL, or disable non-API routes entirely
+- **Upstream proxy**: route all outbound backend requests through an HTTP or SOCKS5 proxy
+- **SSE streaming**: the `/api/v1/stream` endpoint is proxied with full Server-Sent Events streaming support
+- **nginx + SSL**: the installer sets up its own nginx reverse proxy with Let's Encrypt or self-signed certificates
 
 ## Installation
 
@@ -110,27 +110,27 @@ Managed paths let you control what the relay does with each incoming route befor
 
 Each entry has a `prefix` (matched against the full request path, after prepending `uri_prefix`) and an `action`:
 
-| Action | Behaviour |
-|--------|-----------|
-| `proxy` | Forward the request to the Sova backend and stream the response back |
-| `block` | Return 403 Forbidden with a JSON error body |
-| `redirect` | Redirect to the URL in `target` using the status code in `code` (default 301) |
+| Action     | Behaviour                                                                    |
+| ---------- | ---------------------------------------------------------------------------- |
+| `proxy`    | Forward the requests and responses to the Sova backend                       |
+| `block`    | Return 403 Forbidden with a JSON error                                       |
+| `redirect` | Redirect to the URL in `target` with the status code in `code` (default 301) |
 
 Each entry also accepts an optional `methods` list. When present, the rule only applies if the request method is in that list. Rules without `methods` match all methods. This allows multiple rules for the same prefix with different per-method behaviour.
 
-Paths are checked **in order** — the first matching prefix+method combination wins. A prefix matches if the request path equals the prefix exactly or starts with `prefix + "/"`.
+Paths are checked **in order**, the first matching prefix+method combination wins. A prefix matches if the request path equals the prefix exactly or starts with `prefix + "/"`.
 
 ### Wildcard matching
 
 `*` can be used anywhere in a prefix to match any string within a single path segment:
 
-| Pattern | Matches | Does not match |
-|---------|---------|----------------|
-| `/api/v1/channel/*/messages` | `/api/v1/channel/abc123/messages` | `/api/v1/channel/messages` |
-| `/api/v1/channel/a*a/messages` | `/api/v1/channel/abca/messages` | `/api/v1/channel/abc/messages` |
-| `/api/v1/channel/*/messages` | `/api/v1/channel/abc/messages/ack` (sub-path) | `/api/v1/channel/abc/other` |
+| Pattern                        | Matches                                       | Does not match                 |
+| ------------------------------ | --------------------------------------------- | ------------------------------ |
+| `/api/v1/channel/*/messages`   | `/api/v1/channel/abc123/messages`             | `/api/v1/channel/messages`     |
+| `/api/v1/channel/a*a/messages` | `/api/v1/channel/abca/messages`               | `/api/v1/channel/abc/messages` |
+| `/api/v1/channel/*/messages`   | `/api/v1/channel/abc/messages/ack` (sub-path) | `/api/v1/channel/abc/other`    |
 
-Wildcards only expand within their segment — they do not cross `/`. A wildcard pattern still behaves as a prefix: if the path continues past the pattern, it still matches.
+Wildcards only expand within their segment, they do not cross `/`. A wildcard pattern still behaves as a prefix: if the path continues past the pattern, it still matches.
 
 ```toml
 # Block message sending only on a specific channel
@@ -146,20 +146,19 @@ Wildcards only expand within their segment — they do not cross `/`. A wildcard
 
 The default managed paths correspond to Sova's actual routes:
 
-| Prefix | Purpose |
-|--------|---------|
-| `/api/v1` | All REST API endpoints (auth, channels, messages, members, keys, pins, calls) |
-| `/pfp` | Profile picture file serving |
-| `/attachment` | Message attachment file serving |
-| `/health` | Health check endpoint |
+| Prefix        | Purpose                                              |
+| ------------- | ---------------------------------------------------- |
+| `/api/v1`     | All REST API endpoints (auth, channels, messages...) |
+| `/pfp`        | Profile picture file serving                         |
+| `/attachment` | Message attachment file serving                      |
 
 Any request that does not match a managed path is handled by the frontend mode setting.
 
-### Example: block the health endpoint
+### Example: block the pfp prefix
 
 ```toml
 [[paths]]
-    prefix = "/health"
+    prefix = "/pfp"
     action = "block"
 ```
 
@@ -167,12 +166,12 @@ Any request that does not match a managed path is handled by the frontend mode s
 
 The `code` field controls the redirect status. Supported codes:
 
-| Code | Meaning |
-|------|---------|
-| `301` | Permanent — browser caches the redirect, future requests skip this server; method may change to GET |
-| `302` | Temporary — not cached; method may change to GET |
-| `307` | Temporary — not cached; **preserves the original method** (POST stays POST) |
-| `308` | Permanent — cached; **preserves the original method** |
+| Code  | Meaning                             |
+| ----- | ----------------------------------- |
+| `302` | Temporary, method changes to GET    |
+| `307` | Temporary, *preserves the method*   |
+| `301` | Permanent, method may change to GET |
+| `308` | Permanent, *preserves the method*   |
 
 ```toml
 [[paths]]
@@ -196,7 +195,7 @@ The `code` field controls the redirect status. Supported codes:
 
 ## Granular API control
 
-The `methods` field lets you apply different actions to different HTTP methods on the same path. Rules are checked in order — the first rule where both the prefix and the method match is used.
+The `methods` field lets you apply different actions to different HTTP methods on the same path. Rules are checked in order, the first rule where both the prefix and the method match is used.
 
 ### Allow reads, block writes on a route
 
@@ -208,7 +207,7 @@ The `methods` field lets you apply different actions to different HTTP methods o
 
 [[paths]]
     prefix = "/api/v1/channel"
-    # no methods — matches everything else (GET, OPTIONS, HEAD, ...)
+    # no methods matches everything else (GET, OPTIONS, HEAD, ...)
     action = "proxy"
 
 [[paths]]
@@ -238,10 +237,6 @@ Block all write operations across the entire API:
 
 [[paths]]
     prefix = "/attachment"
-    action = "proxy"
-
-[[paths]]
-    prefix = "/health"
     action = "proxy"
 ```
 
@@ -327,15 +322,11 @@ Put both blocks before the `/api/v1` proxy rule so they are matched first:
 [[paths]]
     prefix = "/api/v1"
     action = "proxy"
-
-[[paths]]
-    prefix = "/health"
-    action = "proxy"
 ```
 
 ### Block file uploads
 
-In Sova, file uploads are not a separate endpoint — they are embedded inside regular API calls as multipart form data:
+In Sova, file uploads are not a separate endpoint, they are embedded inside regular API calls as multipart form data:
 
 - **Message attachments** are uploaded via `POST /api/v1/channel/<channel_id>/messages` (same endpoint as plain text messages, with an additional `files` field)
 - **Profile pictures** are uploaded via `PATCH /api/v1/me` (same endpoint as display name changes, with an optional `pfp` field)
@@ -404,10 +395,6 @@ Use `block_files = true` on a proxy rule to inspect the multipart body: if the r
 [[paths]]
     prefix = "/api/v1"
     action = "proxy"
-
-[[paths]]
-    prefix = "/health"
-    action = "proxy"
 ```
 
 ## Manual startup
@@ -418,7 +405,3 @@ python3 main.py
 ```
 
 `config.toml` must exist in the same directory as `main.py`.
-
-## License
-
-MIT
