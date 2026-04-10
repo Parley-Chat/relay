@@ -1,23 +1,67 @@
-name: Release
+name: Build Parley Chat Relay
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version (e.g. v1.0.0)"
+        required: true
 
 jobs:
+  build:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-22.04
+            arch: x64
+          - runner: ubuntu-22.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller
+          pip install -r requirements.txt
+
+      - name: Build binary
+        run: pyinstaller --onefile --name relay-linux-${{ matrix.arch }} main.py
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-linux-${{ matrix.arch }}
+          path: dist/relay-linux-${{ matrix.arch }}
+
   release:
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
 
-      - name: Create release
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: dist/
+
+      - name: Create version.txt
+        run: echo "${{ inputs.version }}" > dist/version.txt
+
+      - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            install.sh
-            main.py
-            requirements.txt
+          tag_name: ${{ inputs.version }}
+          name: ${{ inputs.version }}
           generate_release_notes: true
+          files: |
+            dist/relay-linux-x64
+            dist/relay-linux-arm64
+            dist/version.txt
+            install.sh

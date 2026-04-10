@@ -275,22 +275,19 @@ Block all write operations across the entire API:
 
 ### Block voice calls
 
+Sova's call routes are `POST/DELETE /api/v1/channel/<id>/call` and `POST /api/v1/channel/<id>/call/signal`. Using a wildcard targets them precisely without touching message routes:
+
 ```toml
 [[paths]]
-    prefix = "/api/v1/channel"
-    methods = ["POST", "DELETE"]
-    action = "block"   # blocks call start/end and call signaling POSTs
-
-[[paths]]
-    prefix = "/api/v1/channel"
-    action = "proxy"
+    prefix = "/api/v1/channel/*/call"
+    action = "block"
 
 [[paths]]
     prefix = "/api/v1"
     action = "proxy"
 ```
 
-> Because Sova's call routes (`POST /api/v1/channel/<id>/call`) share the same prefix as message routes (`POST /api/v1/channel/<id>/messages`), blocking `POST` on `/api/v1/channel` also blocks message sending. If you need finer control than prefix matching provides, consider disabling calls in Sova's own `config.toml` (`calls.enabled = false`) and using the relay only for path-level rules.
+`/api/v1/channel/*/call` matches the call endpoint exactly and as a prefix, so `/api/v1/channel/<id>/call/signal` is also blocked.
 
 ## Controlling file access
 

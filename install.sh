@@ -5,6 +5,25 @@ MIRROR="${MIRROR_BASE_URL:-https://github.com/Parley-Chat/relay/releases/latest/
 DEFAULT_INTERNAL_PORT=7861
 DEFAULT_INSTALL_DIR="/opt/parley-relay"
 
+get_arch() {
+    case "$(uname -m)" in
+        x86_64|amd64)  echo "x64" ;;
+        aarch64|arm64) echo "arm64" ;;
+        *) echo "Unsupported architecture: $(uname -m)"; exit 1 ;;
+    esac
+}
+
+ask() {
+    local prompt="$1" default="$2" val
+    [ -n "$default" ] && prompt="$prompt [$default]"
+    read -rp "$prompt: " val
+    echo "${val:-$default}"
+}
+
+is_ip() {
+    python3 -c "import ipaddress,sys; ipaddress.ip_address(sys.argv[1])" "$1" 2>/dev/null
+}
+
 fetch() {
     local url="$1" dest="$2"
     echo "  Downloading $(basename "$dest")..."
@@ -24,17 +43,6 @@ get_or_copy() {
     else
         fetch "$url" "$dest"
     fi
-}
-
-ask() {
-    local prompt="$1" default="$2" val
-    [ -n "$default" ] && prompt="$prompt [$default]"
-    read -rp "$prompt: " val
-    echo "${val:-$default}"
-}
-
-is_ip() {
-    python3 -c "import ipaddress,sys; ipaddress.ip_address(sys.argv[1])" "$1" 2>/dev/null
 }
 
 install_package() {
@@ -75,6 +83,88 @@ gen_self_signed() {
     printf '[req]\ndistinguished_name=req_dn\nx509_extensions=san_ext\nprompt=no\n[req_dn]\nCN=%s\n[san_ext]\nsubjectAltName=%s\n' "$domain" "$san" > "$cfg"
     openssl req -x509 -newkey rsa:2048 -keyout "$key" -out "$cert" -days 3650 -nodes -config "$cfg" 2>/dev/null
     rm -f "$cfg"
+}
+
+save_version() {
+    local install_dir="$1"
+    local ver
+    if command -v wget &>/dev/null; then
+        ver=$(wget -qO- "$MIRROR/version.txt" 2>/dev/null || true)
+    else
+        ver=$(curl -fsSL "$MIRROR/version.txt" 2>/dev/null || true)
+    fi
+    [ -n "$ver" ] && echo "$ver" > "$install_dir/.version"
+}
+
+write_auto_update_script() {
+    local install_dir="$1" arch="$2"
+    local script="$install_dir/auto-update.sh"
+    cat > "$script" <<AUTOUPDATE
+#!/bin/bash
+set -e
+MIRROR="$MIRROR"
+ARCH="$arch"
+INSTALL_DIR="$install_dir"
+VERSION_FILE="\$INSTALL_DIR/.version"
+if command -v wget &>/dev/null; then
+    REMOTE_VERSION=\$(wget -qO- "\$MIRROR/version.txt" 2>/dev/null || true)
+elif command -v curl &>/dev/null; then
+    REMOTE_VERSION=\$(curl -fsSL "\$MIRROR/version.txt" 2>/dev/null || true)
+else
+    echo "Neither wget nor curl found"; exit 1
+fi
+LOCAL_VERSION=\$(cat "\$VERSION_FILE" 2>/dev/null || true)
+if [ -z "\$REMOTE_VERSION" ] || [ "\$LOCAL_VERSION" = "\$REMOTE_VERSION" ]; then
+    exit 0
+fi
+echo "Updating from \$LOCAL_VERSION to \$REMOTE_VERSION"
+systemctl stop parley-relay
+if command -v wget &>/dev/null; then
+    wget -q -O "\$INSTALL_DIR/relay.new" "\$MIRROR/relay-linux-\$ARCH"
+else
+    curl -fsSL "\$MIRROR/relay-linux-\$ARCH" -o "\$INSTALL_DIR/relay.new"
+fi
+chmod +x "\$INSTALL_DIR/relay.new"
+mv "\$INSTALL_DIR/relay.new" "\$INSTALL_DIR/relay"
+echo "\$REMOTE_VERSION" > "\$VERSION_FILE"
+systemctl start parley-relay
+AUTOUPDATE
+    chmod +x "$script"
+}
+
+ask_auto_update_schedule() {
+    echo ""; echo "Auto-update schedule:"
+    echo "[1] Every 5 minutes"
+    echo "[2] Every hour"
+    echo "[3] Daily at 3 AM"
+    echo "[4] Daily at 4 AM"
+    echo "[5] Custom (enter cron expression)"; echo ""
+    read -rp "> " sched_choice
+    case "$sched_choice" in
+        1) AUTO_UPDATE_EXPR="*/5 * * * *";  AUTO_UPDATE_LABEL="every 5 minutes" ;;
+        2) AUTO_UPDATE_EXPR="0 * * * *";    AUTO_UPDATE_LABEL="every hour" ;;
+        4) AUTO_UPDATE_EXPR="0 4 * * *";    AUTO_UPDATE_LABEL="daily at 4 AM" ;;
+        5)
+            AUTO_UPDATE_EXPR=$(ask "Cron expression (e.g. '0 2 * * *' for daily at 2 AM)")
+            AUTO_UPDATE_LABEL="on schedule '$AUTO_UPDATE_EXPR'"
+            ;;
+        *) AUTO_UPDATE_EXPR="0 3 * * *";    AUTO_UPDATE_LABEL="daily at 3 AM" ;;
+    esac
+}
+
+setup_auto_update_cron() {
+    local script="$1" expr="$2"
+    local cron_job="$expr $script >> /var/log/parley-relay-update.log 2>&1"
+    local existing; existing=$(crontab -l 2>/dev/null || true)
+    echo "$existing" | grep -qF "$script" && return 0
+    { echo "$existing"; echo "$cron_job"; } | crontab -
+}
+
+remove_auto_update_cron() {
+    local install_dir="$1"
+    local script="$install_dir/auto-update.sh"
+    local existing; existing=$(crontab -l 2>/dev/null || true)
+    echo "$existing" | grep -vF "$script" | crontab - 2>/dev/null || true
 }
 
 CERT_FILE="" KEY_FILE="" SSL_TYPE=""
@@ -234,6 +324,9 @@ SVCEOF
 }
 
 do_install() {
+    local arch; arch=$(get_arch)
+    local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
     echo ""
     local domain; domain=$(ask "Domain or IP address")
     [ -z "$domain" ] && { echo "Domain/IP is required."; exit 1; }
@@ -276,34 +369,42 @@ do_install() {
         *) fe_mode="serve"; fe_dir=$(ask "Frontend directory" "$install_dir/mura") ;;
     esac
 
+    local auto_update; auto_update=$(ask "Enable automatic updates? [y/N]" "n")
+
     echo ""; echo "Installing to $install_dir..."; echo ""
     mkdir -p "$install_dir" "$install_dir/certs"
-
-    local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
     if [[ "${use_nginx,,}" != "n" ]]; then
         echo "  Setting up SSL..."
         setup_ssl "$domain" "$install_dir"
     fi
 
-    echo "  Fetching files..."
-    get_or_copy "$MIRROR/main.py" "$install_dir/main.py" "$script_dir/main.py"
-    get_or_copy "$MIRROR/requirements.txt" "$install_dir/requirements.txt" "$script_dir/requirements.txt"
-
-    echo "  Installing Python dependencies..."
-    pip3 install -r "$install_dir/requirements.txt" -q
+    echo "  Fetching relay binary..."
+    get_or_copy "$MIRROR/relay-linux-$arch" "$install_dir/relay" "$script_dir/relay-linux-$arch"
+    chmod +x "$install_dir/relay"
 
     echo "  Writing config..."
     write_relay_config "$install_dir/config.toml" "$uri_prefix" "$relay_host" "$int_port" "$backend_url" "$threads" "$up_enabled" "$up_url" "$fe_mode" "$fe_dir" "$fe_url"
 
     echo "  Writing systemd service..."
-    write_service "parley-relay" "Parley Chat Relay" "$install_dir" "python3 $install_dir/main.py"
+    write_service "parley-relay" "Parley Chat Relay" "$install_dir" "$install_dir/relay"
 
     if [[ "${use_nginx,,}" != "n" ]]; then
         echo "  Setting up nginx..."
         ensure_nginx
         write_nginx_conf "$install_dir/nginx.conf" "$ext_port" "$domain" "$CERT_FILE" "$KEY_FILE" "$relay_host" "$int_port"
         write_service "parley-relay-nginx" "Parley Chat Relay nginx" "$install_dir" "/usr/sbin/nginx -c $install_dir/nginx.conf -g 'daemon off;'"
+    fi
+
+    save_version "$install_dir"
+
+    AUTO_UPDATE_EXPR="0 3 * * *"
+    AUTO_UPDATE_LABEL="daily at 3 AM"
+    if [[ "${auto_update,,}" == "y" ]]; then
+        echo "  Setting up auto-update..."
+        ask_auto_update_schedule
+        write_auto_update_script "$install_dir" "$arch"
+        setup_auto_update_cron "$install_dir/auto-update.sh" "$AUTO_UPDATE_EXPR"
     fi
 
     echo "  Starting services..."
@@ -323,12 +424,13 @@ do_install() {
         echo "Point your external reverse proxy to this address."
         echo "Make sure your proxy sets X-Forwarded-Proto and X-Real-IP headers."
     fi
+    [[ "${auto_update,,}" == "y" ]] && echo "Auto-update is enabled and will run $AUTO_UPDATE_LABEL."
 }
 
 do_uninstall() {
     echo ""
     local install_dir; install_dir=$(ask "Install directory" "$DEFAULT_INSTALL_DIR")
-    [ ! -f "$install_dir/main.py" ] && { echo "No installation found at $install_dir."; exit 1; }
+    [ ! -f "$install_dir/relay" ] && { echo "No installation found at $install_dir."; exit 1; }
     local confirm; confirm=$(ask "This will permanently remove $install_dir and all its contents. Type 'yes' to confirm")
     [ "$confirm" != "yes" ] && { echo "Cancelled."; exit 0; }
     echo ""; echo "Uninstalling Parley Chat Relay..."; echo ""
@@ -338,12 +440,13 @@ do_uninstall() {
     done
     rm -f /etc/systemd/system/parley-relay.service /etc/systemd/system/parley-relay-nginx.service
     systemctl daemon-reload
+    remove_auto_update_cron "$install_dir"
     rm -rf "$install_dir"
     echo "Parley Chat Relay has been uninstalled."
 }
 
 main() {
-    echo ""; echo "=== Parley Chat Relay Setup ==="; echo ""
+    echo ""; echo "=== Parley Chat Relay Installer ==="; echo ""
     [ "$(id -u)" != "0" ] && { echo "Please run as root (sudo)."; exit 1; }
     echo "[I] Install"
     echo "[X] Uninstall"
