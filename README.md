@@ -1,5 +1,7 @@
 # Parley Chat Relay
 
+[🇮🇷 فارسی](README.fa.md)
+
 A lightweight reverse proxy for [Parley Chat](https://github.com/Parley-Chat) that sits in front of a Sova backend. It lets you control which paths are exposed, block unwanted routes, forward frontend requests, and route traffic through an upstream HTTP or SOCKS5 proxy.
 
 ## What it is
