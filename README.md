@@ -16,10 +16,16 @@ Key capabilities:
 
 ## Installation
 
-Run as root:
+Download and run the installer:
 
 ```bash
-sudo bash setup.sh
+wget -qO install.sh https://github.com/Parley-Chat/relay/releases/latest/download/install.sh && sudo bash install.sh
+```
+
+Or with curl:
+
+```bash
+curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh | sudo bash
 ```
 
 The script will walk you through:
@@ -38,7 +44,7 @@ It installs Python dependencies, writes `config.toml`, creates systemd services 
 To uninstall:
 
 ```bash
-sudo bash setup.sh
+sudo bash install.sh
 # choose [X] Uninstall
 ```
 

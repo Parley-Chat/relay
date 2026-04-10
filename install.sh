@@ -1,8 +1,30 @@
 #!/usr/bin/env bash
 set -e
 
+MIRROR="${MIRROR_BASE_URL:-https://github.com/Parley-Chat/relay/releases/latest/download}"
 DEFAULT_INTERNAL_PORT=7861
 DEFAULT_INSTALL_DIR="/opt/parley-relay"
+
+fetch() {
+    local url="$1" dest="$2"
+    echo "  Downloading $(basename "$dest")..."
+    if command -v wget &>/dev/null; then
+        wget --progress=bar -O "$dest" "$url" 2>&1 | tail -1 || { echo "  Download failed: $url"; exit 1; }
+    elif command -v curl &>/dev/null; then
+        curl -fL --progress-bar "$url" -o "$dest" || { echo "  Download failed: $url"; exit 1; }
+    else
+        echo "  Neither wget nor curl found. Please install one of them."; exit 1
+    fi
+}
+
+get_or_copy() {
+    local url="$1" dest="$2" local_src="$3"
+    if [ -f "$local_src" ]; then
+        cp "$local_src" "$dest"
+    else
+        fetch "$url" "$dest"
+    fi
+}
 
 ask() {
     local prompt="$1" default="$2" val
@@ -259,17 +281,17 @@ do_install() {
 
     local script_dir; script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-    echo "  Installing Python dependencies..."
-    pip3 install -r "$script_dir/requirements.txt" -q
-
     if [[ "${use_nginx,,}" != "n" ]]; then
         echo "  Setting up SSL..."
         setup_ssl "$domain" "$install_dir"
     fi
 
-    echo "  Copying files..."
-    cp "$script_dir/main.py" "$install_dir/main.py"
-    cp "$script_dir/requirements.txt" "$install_dir/requirements.txt"
+    echo "  Fetching files..."
+    get_or_copy "$MIRROR/main.py" "$install_dir/main.py" "$script_dir/main.py"
+    get_or_copy "$MIRROR/requirements.txt" "$install_dir/requirements.txt" "$script_dir/requirements.txt"
+
+    echo "  Installing Python dependencies..."
+    pip3 install -r "$install_dir/requirements.txt" -q
 
     echo "  Writing config..."
     write_relay_config "$install_dir/config.toml" "$uri_prefix" "$relay_host" "$int_port" "$backend_url" "$threads" "$up_enabled" "$up_url" "$fe_mode" "$fe_dir" "$fe_url"

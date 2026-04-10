@@ -17,10 +17,16 @@ Relay یک برنامهٔ Python است (Flask + Waitress) که درخواست�
 
 ## نصب
 
-به عنوان root اجرا کنید:
+دانلود و اجرای نصب‌کننده:
 
 ```bash
-sudo bash setup.sh
+wget -qO install.sh https://github.com/Parley-Chat/relay/releases/latest/download/install.sh && sudo bash install.sh
+```
+
+یا با curl:
+
+```bash
+curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh | sudo bash
 ```
 
 اسکریپت مراحل زیر را طی می‌کند:
@@ -39,7 +45,7 @@ sudo bash setup.sh
 برای حذف نصب:
 
 ```bash
-sudo bash setup.sh
+sudo bash install.sh
 # گزینه [X] Uninstall را انتخاب کنید
 ```
 

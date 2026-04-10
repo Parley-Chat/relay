@@ -1,0 +1,4 @@
+.claude/
+config.toml
+__pycache__/
+*.pyc
