@@ -67,6 +67,8 @@ def proxy_to(url, stream=False):
         return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
     out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
     if stream:
+        out_headers["X-Accel-Buffering"] = "no"
+        out_headers["Cache-Control"] = "no-cache"
         def generate():
             try:
                 for chunk in resp.iter_content(chunk_size=None):
