@@ -244,6 +244,25 @@ http {
             return 301 https://\$host:$ext_port\$request_uri;
         }
 
+        location ~ /api/v1/stream$ {
+            proxy_pass http://$relay_host:$int_port;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_set_header Host \$host;
+            proxy_set_header X-Real-IP \$remote_addr;
+            proxy_set_header X-Forwarded-For \$remote_addr;
+            proxy_set_header X-Forwarded-Proto \$scheme;
+            proxy_cache off;
+            proxy_buffering off;
+            proxy_request_buffering off;
+            proxy_read_timeout 24h;
+            proxy_send_timeout 24h;
+            chunked_transfer_encoding off;
+            gzip off;
+            add_header X-Accel-Buffering no;
+            proxy_redirect ~^https?://[^/]+(.*)$ \$scheme://\$browser_authority\$1;
+        }
+
         location / {
             proxy_pass http://$relay_host:$int_port;
             proxy_http_version 1.1;
