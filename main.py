@@ -80,9 +80,28 @@ def build_headers():
     headers["X-Forwarded-Proto"]=request.scheme
     return headers
 
-def proxy_to(url):
+def proxy_to(url, max_size=0):
     if request.query_string:
         url=url+"?"+request.query_string.decode("utf-8", errors="replace")
+    if max_size>0 and request.method in ["GET", "HEAD"]:
+        try: head_resp=upstream_session.request(method="HEAD", url=url, headers=build_headers(), timeout=60, allow_redirects=False)
+        except requests.RequestException as e:
+            colored_log(RED, "ERROR", f"Upstream HEAD request failed: {e}")
+            return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
+        if head_resp.status_code<400:
+            content_length=head_resp.headers.get("Content-Length", "").strip()
+            if not content_length.isdigit():
+                head_resp.close()
+                return Response('{"error":"content size unavailable"}', status=502, content_type="application/json")
+            if int(content_length)>max_size:
+                head_resp.close()
+                return Response('{"error":"content too large"}', status=413, content_type="application/json")
+        if request.method=="HEAD":
+            out_headers={k: v for k, v in head_resp.headers.items() if k.lower() not in HOP_BY_HOP}
+            status_code=head_resp.status_code
+            head_resp.close()
+            return Response(status=status_code, headers=out_headers)
+        head_resp.close()
     is_stream=request.path==stream_path
     if is_stream:
         colored_log(BLUE, "STREAM", f"Opening {request.method} {url}")
@@ -157,7 +176,7 @@ def catch_all(path):
         if action=="proxy":
             target=backend_url+full_path
             if p.get("block_files"): return proxy_no_files(target)
-            return proxy_to(target)
+            return proxy_to(target, max_size=p.get("max_size", 0))
         if action=="block": return Response('{"error":"forbidden"}', status=403, content_type="application/json")
         if action=="redirect": return Response(status=p.get("code", 301), headers={"Location": p.get("target","/")})
     if frontend_mode=="disabled": abort(404)

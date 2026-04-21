@@ -90,6 +90,8 @@ uri_prefix = "your20charprefix"
 # methods: optional list — omit to match all methods
 # block_files: optional bool (action="proxy" only) — reject multipart requests
 #              that contain file uploads (403), but proxy plain form posts through
+# max_size: optional int (action="proxy" only) — for GET/HEAD requests, send an
+#           upstream HEAD request first and reject responses larger than this size
 # For "redirect": target = "https://example.com"
 #                 code = 301 (default), 302, 307, or 308
 
@@ -104,6 +106,7 @@ uri_prefix = "your20charprefix"
 [[paths]]
     prefix = "/attachment"
     action = "proxy"
+    # max_size = 10485760  # 10 MB download limit for this route
 
 [[paths]]
     prefix = "/health"
@@ -301,6 +304,21 @@ Attachment files are served from `GET /attachment/<file_id>`. To prevent clients
     prefix = "/attachment"
     action = "block"
 ```
+
+### Limit attachment download size
+
+Set `max_size` on any proxied managed path to a positive byte value to make the relay send an upstream `HEAD` request before proxying `GET` or `HEAD` requests on that route. If the backend reports a `Content-Length` larger than the configured limit, the relay returns `413` and does not fetch the body.
+
+```toml
+[[paths]]
+    prefix = "/attachment"
+    action = "proxy"
+    max_size = 10485760  # 10 MB
+```
+
+You can use the same option on any other proxied prefix, not just `/attachment`.
+
+If the backend does not provide `Content-Length` on the upstream `HEAD` response, the relay returns `502` because it cannot verify the size safely.
 
 ### Block profile picture access
 
