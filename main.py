@@ -2,7 +2,7 @@ import os, sys
 os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__)))
 import tomllib, fnmatch
 import requests
-from flask import Flask, request, Response, send_from_directory, abort
+from flask import Flask, request, Response, send_from_directory, abort, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 BLUE="\033[34m"
@@ -36,12 +36,28 @@ frontend_mode=config["frontend"]["mode"]
 frontend_directory=config["frontend"].get("directory", "")
 frontend_url=config["frontend"].get("url", "").rstrip("/")
 frontend_excluded=config["frontend"].get("excluded_paths", ["README.md", "LICENSE.md", ".nojekyll", ".git", "quickrun.js"])
+error_text={"404": "not found", "405": "method not allowed", "400": "bad request", "413": "content too big", "415": "unsupported media type", "500": "internal server error"}
 
 app=Flask(__name__, static_folder=None)
 app.wsgi_app=ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
 app.config["MAX_CONTENT_LENGTH"]=config["server"].get("max_content_length", 67108864)
 
 HOP_BY_HOP={"connection","transfer-encoding","content-encoding","content-length","host","keep-alive","proxy-authenticate","proxy-authorization","te","trailers","upgrade"}
+
+api_url=(uri_prefix or "")+"/api/v1/"
+
+@app.errorhandler(404)
+@app.errorhandler(405)
+@app.errorhandler(400)
+@app.errorhandler(413)
+@app.errorhandler(415)
+@app.errorhandler(500)
+def error_handler(error):
+    if request.path.startswith(uri_prefix):
+        if request.path==api_url or (request.path+"/").startswith(api_url): return Response(f'{{"error":"{error_text[str(error.code)]}"}}', status=error.code, content_type="application/json")
+        try: return (send_from_directory(frontend_directory, f"{error.code}.html"), error.code) if frontend_mode=="serve" and os.path.isdir(frontend_directory) else (error_text[str(error.code)], error.code)
+        except: return error_text[str(error.code)], error.code
+    return jsonify({"error": error_text[str(error.code)]}), error.code
 
 def path_matches(pattern, path):
     if "*" not in pattern: return path==pattern or path.startswith(pattern+"/")
@@ -61,7 +77,7 @@ def proxy_to(url):
     if request.query_string:
         url=url+"?"+request.query_string.decode("utf-8", errors="replace")
     try:
-        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=True, timeout=(10, 60), allow_redirects=False)
+        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=True, timeout=(10, None) if request.path==(uri_prefix+"/api/v1/stream" if uri_prefix else "/api/v1/stream") else (10, 60), allow_redirects=False)
     except requests.RequestException as e:
         colored_log(RED, "ERROR", f"Backend request failed: {e}")
         return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
