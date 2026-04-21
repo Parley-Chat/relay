@@ -66,18 +66,12 @@ def proxy_to(url):
         colored_log(RED, "ERROR", f"Backend request failed: {e}")
         return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
     out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
-    if "text/event-stream" in resp.headers.get("Content-Type", ""):
-        out_headers["X-Accel-Buffering"] = "no"
-        out_headers["Cache-Control"] = "no-cache"
-        def generate():
-            try:
-                for chunk in resp.iter_content(chunk_size=None):
-                    if chunk: yield chunk
-            finally: resp.close()
-        return Response(generate(), status=resp.status_code, headers=out_headers, direct_passthrough=True)
-    content=resp.content
-    resp.close()
-    return Response(content, status=resp.status_code, headers=out_headers)
+    def generate():
+        try:
+            for chunk in resp.iter_content(chunk_size=None):
+                if chunk: yield chunk
+        finally: resp.close()
+    return Response(generate(), status=resp.status_code, headers=out_headers, direct_passthrough=True)
 
 def proxy_no_files(url):
     if "multipart/form-data" in (request.content_type or ""):
