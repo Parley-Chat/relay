@@ -2,6 +2,7 @@ import os, sys
 os.chdir(os.path.dirname(os.path.abspath(sys.argv[0])) if getattr(sys, "frozen", False) else os.path.dirname(os.path.abspath(__file__)))
 import tomllib, fnmatch
 import requests
+import httpx
 from flask import Flask, request, Response, send_from_directory, abort, jsonify
 from werkzeug.middleware.proxy_fix import ProxyFix
 
@@ -24,10 +25,13 @@ if config.get("version", 0)<1:
     sys.exit(1)
 
 upstream_session=requests.Session()
+upstream_stream_client=None
 if config["upstream_proxy"]["enabled"] and config["upstream_proxy"]["url"]:
     proxy_url=config["upstream_proxy"]["url"]
     upstream_session.proxies.update({"http": proxy_url, "https": proxy_url})
     colored_log(BLUE, "INFO", f"Using upstream proxy: {proxy_url}")
+    upstream_stream_client=httpx.Client(http2=True, proxy=proxy_url, follow_redirects=False)
+else: upstream_stream_client=httpx.Client(http2=True, follow_redirects=False)
 
 backend_url=config["backend"]["url"].rstrip("/")
 uri_prefix=("/"+config["uri_prefix"]) if config.get("uri_prefix") else ""
@@ -45,6 +49,7 @@ app.config["MAX_CONTENT_LENGTH"]=config["server"].get("max_content_length", 6710
 HOP_BY_HOP={"connection","transfer-encoding","content-encoding","content-length","host","keep-alive","proxy-authenticate","proxy-authorization","te","trailers","upgrade"}
 
 api_url=(uri_prefix or "")+"/api/v1/"
+stream_path=(uri_prefix+"/api/v1/stream") if uri_prefix else "/api/v1/stream"
 
 @app.errorhandler(404)
 @app.errorhandler(405)
@@ -68,6 +73,7 @@ def path_matches(pattern, path):
 
 def build_headers():
     headers={k: v for k, v in request.headers if k.lower() not in HOP_BY_HOP}
+    if request.path==stream_path: headers["Accept-Encoding"]="identity"
     headers["X-Real-IP"]=request.remote_addr
     headers["X-Forwarded-For"]=request.remote_addr
     headers["X-Forwarded-Proto"]=request.scheme
@@ -76,15 +82,44 @@ def build_headers():
 def proxy_to(url):
     if request.query_string:
         url=url+"?"+request.query_string.decode("utf-8", errors="replace")
+    is_stream=request.path==stream_path
+    if is_stream:
+        colored_log(BLUE, "STREAM", f"Opening {request.method} {url}")
+        req=upstream_stream_client.build_request(request.method, url, headers=build_headers(), content=request.get_data())
+        try: resp=upstream_stream_client.send(req, stream=True)
+        except httpx.HTTPError as e:
+            colored_log(RED, "STREAM", f"Upstream stream failed: {e}")
+            return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
+        colored_log(BLUE, "STREAM", f"Upstream response {resp.status_code} via {resp.http_version}")
+        out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
+        out_headers["Cache-Control"]="no-cache"
+        out_headers["X-Accel-Buffering"]="no"
+        def generate_stream():
+            first_chunk=True
+            try:
+                for chunk in resp.iter_raw():
+                    if chunk:
+                        if first_chunk:
+                            colored_log(BLUE, "STREAM", f"First chunk received ({len(chunk)} bytes)")
+                            first_chunk=False
+                        yield chunk
+            except httpx.HTTPError as e: colored_log(RED, "STREAM", f"Stream interrupted: {e}")
+            finally:
+                resp.close()
+                colored_log(BLUE, "STREAM", f"Closed {request.method} {url}")
+        return Response(generate_stream(), status=resp.status_code, headers=out_headers, direct_passthrough=True)
     try:
-        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=True, timeout=(10, None) if request.path==(uri_prefix+"/api/v1/stream" if uri_prefix else "/api/v1/stream") else (10, 60), allow_redirects=False)
+        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=True, timeout=(10, None) if is_stream else (10, 60), allow_redirects=False)
     except requests.RequestException as e:
         colored_log(RED, "ERROR", f"Backend request failed: {e}")
         return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
     out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
+    if is_stream or resp.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()=="text/event-stream":
+        out_headers["Cache-Control"]="no-cache"
+        out_headers["X-Accel-Buffering"]="no"
     def generate():
         try:
-            for chunk in resp.iter_content(chunk_size=None):
+            for chunk in resp.iter_content(chunk_size=1 if is_stream else None):
                 if chunk: yield chunk
         finally: resp.close()
     return Response(generate(), status=resp.status_code, headers=out_headers, direct_passthrough=True)
