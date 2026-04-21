@@ -26,12 +26,13 @@ if config.get("version", 0)<1:
 
 upstream_session=requests.Session()
 upstream_stream_client=None
+stream_timeout=httpx.Timeout(connect=10.0, read=None, write=60.0, pool=60.0)
 if config["upstream_proxy"]["enabled"] and config["upstream_proxy"]["url"]:
     proxy_url=config["upstream_proxy"]["url"]
     upstream_session.proxies.update({"http": proxy_url, "https": proxy_url})
     colored_log(BLUE, "INFO", f"Using upstream proxy: {proxy_url}")
-    upstream_stream_client=httpx.Client(http2=True, proxy=proxy_url, follow_redirects=False)
-else: upstream_stream_client=httpx.Client(http2=True, follow_redirects=False)
+    upstream_stream_client=httpx.Client(http2=True, proxy=proxy_url, follow_redirects=False, timeout=stream_timeout)
+else: upstream_stream_client=httpx.Client(http2=True, follow_redirects=False, timeout=stream_timeout)
 
 backend_url=config["backend"]["url"].rstrip("/")
 uri_prefix=("/"+config["uri_prefix"]) if config.get("uri_prefix") else ""
@@ -94,9 +95,11 @@ def proxy_to(url):
         out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
         out_headers["Cache-Control"]="no-cache"
         out_headers["X-Accel-Buffering"]="no"
+        out_headers["Content-Type"]="text/event-stream"
         def generate_stream():
             first_chunk=True
             try:
+                yield b": relay\n\n"
                 for chunk in resp.iter_raw():
                     if chunk:
                         if first_chunk:
