@@ -57,16 +57,16 @@ def build_headers():
     headers["X-Forwarded-Proto"]=request.scheme
     return headers
 
-def proxy_to(url, stream=False):
+def proxy_to(url):
     if request.query_string:
         url=url+"?"+request.query_string.decode("utf-8", errors="replace")
     try:
-        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=stream, timeout=(10, None) if stream else 60, allow_redirects=False)
+        resp=upstream_session.request(method=request.method, url=url, headers=build_headers(), data=request.get_data(), stream=True, timeout=(10, 60), allow_redirects=False)
     except requests.RequestException as e:
         colored_log(RED, "ERROR", f"Backend request failed: {e}")
         return Response('{"error":"backend unavailable"}', status=502, content_type="application/json")
     out_headers={k: v for k, v in resp.headers.items() if k.lower() not in HOP_BY_HOP}
-    if stream:
+    if "text/event-stream" in resp.headers.get("Content-Type", ""):
         out_headers["X-Accel-Buffering"] = "no"
         out_headers["Cache-Control"] = "no-cache"
         def generate():
@@ -75,7 +75,9 @@ def proxy_to(url, stream=False):
                     if chunk: yield chunk
             finally: resp.close()
         return Response(generate(), status=resp.status_code, headers=out_headers, direct_passthrough=True)
-    return Response(resp.content, status=resp.status_code, headers=out_headers)
+    content=resp.content
+    resp.close()
+    return Response(content, status=resp.status_code, headers=out_headers)
 
 def proxy_no_files(url):
     if "multipart/form-data" in (request.content_type or ""):
@@ -107,7 +109,7 @@ def catch_all(path):
         if action=="proxy":
             target=backend_url+full_path
             if p.get("block_files"): return proxy_no_files(target)
-            return proxy_to(target, stream="text/event-stream" in request.headers.get("Accept",""))
+            return proxy_to(target)
         if action=="block": return Response('{"error":"forbidden"}', status=403, content_type="application/json")
         if action=="redirect": return Response(status=p.get("code", 301), headers={"Location": p.get("target","/")})
     if frontend_mode=="disabled": abort(404)
