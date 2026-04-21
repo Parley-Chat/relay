@@ -226,6 +226,10 @@ http {
         default \$http_host;
         ""      \$host;
     }
+    map \$http_upgrade \$connection_upgrade {
+        default    '';
+        websocket  Upgrade;
+    }
     server {
         listen $ext_port ssl http2;
         server_name $domain;
@@ -244,7 +248,7 @@ http {
             proxy_pass http://$relay_host:$int_port;
             proxy_http_version 1.1;
             proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "keep-alive";
+            proxy_set_header Connection \$connection_upgrade;
             proxy_set_header Host \$host;
             proxy_set_header X-Real-IP \$remote_addr;
             proxy_set_header X-Forwarded-For \$remote_addr;
@@ -286,6 +290,7 @@ uri_prefix="$uri_prefix"
     mode="$fe_mode"
     directory="$fe_dir"
     url="$fe_url"
+    excluded_paths=["README.md", "LICENSE.md", ".nojekyll", ".git", "quickrun.js"]
 
 [[paths]]
     prefix="/api/v1"
@@ -331,8 +336,7 @@ do_install() {
     local domain; domain=$(ask "Domain or IP address")
     [ -z "$domain" ] && { echo "Domain/IP is required."; exit 1; }
 
-    local uri_prefix; uri_prefix=$(python3 -c "import random,string; print(''.join(random.choices(string.ascii_lowercase+string.digits,k=20)))")
-    uri_prefix=$(ask "URI path prefix (must match Sova's uri_prefix)" "$uri_prefix")
+    local uri_prefix; uri_prefix=$(ask "URI path prefix (leave blank if Sova has no prefix)")
 
     local backend_url; backend_url=$(ask "Sova backend URL" "http://127.0.0.1:42836")
     local install_dir; install_dir=$(ask "Install directory" "$DEFAULT_INSTALL_DIR")
@@ -373,6 +377,17 @@ do_install() {
 
     echo ""; echo "Installing to $install_dir..."; echo ""
     mkdir -p "$install_dir" "$install_dir/certs"
+
+    if [[ "$fe_mode" == "serve" ]]; then
+        echo "  Cloning Mura frontend..."
+        if [ -d "$fe_dir" ]; then
+            echo "  Directory $fe_dir already exists, skipping clone."
+        elif command -v git &>/dev/null; then
+            git clone https://github.com/Parley-Chat/Mura "$fe_dir" 2>/dev/null || echo "  Warning: Could not clone Mura. Populate $fe_dir manually."
+        else
+            echo "  git not found. Install git and clone https://github.com/Parley-Chat/Mura into $fe_dir manually."
+        fi
+    fi
 
     if [[ "${use_nginx,,}" != "n" ]]; then
         echo "  Setting up SSL..."
@@ -427,6 +442,31 @@ do_install() {
     [[ "${auto_update,,}" == "y" ]] && echo "Auto-update is enabled and will run $AUTO_UPDATE_LABEL."
 }
 
+do_update() {
+    local arch; arch=$(get_arch)
+    local install_dir; install_dir=$(ask "Install directory" "$DEFAULT_INSTALL_DIR")
+    [ ! -f "$install_dir/relay" ] && { echo "No installation found at $install_dir."; exit 1; }
+    echo ""; echo "Checking for updates..."; echo ""
+    local remote_ver
+    if command -v wget &>/dev/null; then
+        remote_ver=$(wget -qO- "$MIRROR/version.txt" 2>/dev/null || true)
+    else
+        remote_ver=$(curl -fsSL "$MIRROR/version.txt" 2>/dev/null || true)
+    fi
+    local local_ver; local_ver=$(cat "$install_dir/.version" 2>/dev/null || true)
+    if [ -n "$remote_ver" ] && [ "$local_ver" = "$remote_ver" ]; then
+        echo "Already up to date ($local_ver)."; exit 0
+    fi
+    [ -n "$remote_ver" ] && echo "  Updating from ${local_ver:-unknown} to $remote_ver..."
+    systemctl stop parley-relay 2>/dev/null || true
+    fetch "$MIRROR/relay-linux-$arch" "$install_dir/relay.new"
+    chmod +x "$install_dir/relay.new"
+    mv "$install_dir/relay.new" "$install_dir/relay"
+    [ -n "$remote_ver" ] && echo "$remote_ver" > "$install_dir/.version"
+    systemctl start parley-relay 2>/dev/null || true
+    echo "Update complete."
+}
+
 do_uninstall() {
     echo ""
     local install_dir; install_dir=$(ask "Install directory" "$DEFAULT_INSTALL_DIR")
@@ -449,10 +489,12 @@ main() {
     echo ""; echo "=== Parley Chat Relay Installer ==="; echo ""
     [ "$(id -u)" != "0" ] && { echo "Please run as root (sudo)."; exit 1; }
     echo "[I] Install"
+    echo "[U] Update"
     echo "[X] Uninstall"
     echo ""; read -rp "> " action
     case "${action,,}" in
         i) do_install ;;
+        u) do_update ;;
         x) do_uninstall ;;
         *) echo "Invalid choice."; exit 1 ;;
     esac

@@ -21,7 +21,7 @@ Relay یک برنامهٔ Python است (Flask + Waitress) که درخواست�
 دانلود و اجرای نصب‌کننده:
 
 ```bash
-wget https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -O install.sh
+wget https://raw.githubusercontent.com/Parley-Chat/relay/main/install.sh -O install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
@@ -29,7 +29,7 @@ sudo ./install.sh
 یا با curl:
 
 ```bash
-curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/Parley-Chat/relay/main/install.sh -o install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```

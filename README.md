@@ -21,7 +21,7 @@ Key capabilities:
 Download and run the installer:
 
 ```bash
-wget https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -O install.sh
+wget https://raw.githubusercontent.com/Parley-Chat/relay/main/install.sh -O install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```
@@ -29,7 +29,7 @@ sudo ./install.sh
 With curl:
 
 ```bash
-curl -fsSL https://github.com/Parley-Chat/relay/releases/latest/download/install.sh -o install.sh
+curl -fsSL https://raw.githubusercontent.com/Parley-Chat/relay/main/install.sh -o install.sh
 chmod +x install.sh
 sudo ./install.sh
 ```

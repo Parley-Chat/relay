@@ -35,6 +35,7 @@ managed_paths=config.get("paths", [])
 frontend_mode=config["frontend"]["mode"]
 frontend_directory=config["frontend"].get("directory", "")
 frontend_url=config["frontend"].get("url", "").rstrip("/")
+frontend_excluded=config["frontend"].get("excluded_paths", ["README.md", "LICENSE.md", ".nojekyll", ".git", "quickrun.js"])
 
 app=Flask(__name__, static_folder=None)
 app.wsgi_app=ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1, x_prefix=1)
@@ -113,6 +114,7 @@ def catch_all(path):
         if not os.path.isdir(frontend_directory): abort(404)
         rel=full_path[len(uri_prefix):] if uri_prefix and full_path.startswith(uri_prefix) else full_path
         rel=rel.lstrip("/") or "index.html"
+        if rel.split("/")[0] in frontend_excluded: abort(404)
         if "." not in rel.split("/")[-1]: rel+=".html"
         try: return send_from_directory(frontend_directory, rel)
         except: abort(404)
